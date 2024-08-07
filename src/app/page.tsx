@@ -9,108 +9,9 @@ import app from "./config/firebase";
 import { useState, useEffect } from "react";
 import { User } from "firebase/auth";
 import openai from "./config/openapi";
+import { farmingCrops, popularTravelCities } from "../lib/constants";
 
 import { BarChartHero } from "@/components/BarChart";
-
-const WEATHER_API = "https://api.open-meteo.com/v1/forecast";
-
-const popularTravelCities = [
-  "Paris",
-  "Tokyo",
-  "New York",
-  "Rome",
-  "London",
-  "Barcelona",
-  "Dubai",
-  "Sydney",
-  "Amsterdam",
-  "Bangkok",
-];
-
-const farmingCrops = [
-  "Corn",
-  "Wheat",
-  "Barley",
-  "Rice",
-  "Oats",
-  "Soybeans",
-  "Cotton",
-];
-
-const cropData = {
-  crops: [
-    {
-      name: "Corn",
-      optimal_temperature: {
-        min: 16,
-        max: 30,
-      },
-      yield_time_weeks: 18,
-      water_requirements_liters_per_week: 30,
-      sunlight_hours_per_day: 8,
-    },
-    {
-      name: "Wheat",
-      optimal_temperature: {
-        min: 10,
-        max: 20,
-      },
-      yield_time_weeks: 16,
-      water_requirements_liters_per_week: 20,
-      sunlight_hours_per_day: 6,
-    },
-    {
-      name: "Barley",
-      optimal_temperature: {
-        min: 10,
-        max: 20,
-      },
-      yield_time_weeks: 14,
-      water_requirements_liters_per_week: 15,
-      sunlight_hours_per_day: 6,
-    },
-    {
-      name: "Rice",
-      optimal_temperature: {
-        min: 22,
-        max: 32,
-      },
-      yield_time_weeks: 22,
-      water_requirements_liters_per_week: 40,
-      sunlight_hours_per_day: 8,
-    },
-    {
-      name: "Oats",
-      optimal_temperature: {
-        min: 10,
-        max: 18,
-      },
-      yield_time_weeks: 12,
-      water_requirements_liters_per_week: 20,
-      sunlight_hours_per_day: 6,
-    },
-    {
-      name: "Soybeans",
-      optimal_temperature: {
-        min: 18,
-        max: 30,
-      },
-      yield_time_weeks: 16,
-      water_requirements_liters_per_week: 25,
-      sunlight_hours_per_day: 8,
-    },
-    {
-      name: "Cotton",
-      optimal_temperature: {
-        min: 18,
-        max: 35,
-      },
-      yield_time_weeks: 20,
-      water_requirements_liters_per_week: 30,
-      sunlight_hours_per_day: 8,
-    },
-  ],
-};
 
 async function generateOpenAIResponse(prompt: string): Promise<string> {
   try {
@@ -136,9 +37,12 @@ export default function Home() {
   const [cropSuggestion, setCropSuggestion] = useState("");
   const [travelSuggestion, setTravelSuggestion] = useState("");
   const [userGreeting, setUserGreeting] = useState("");
-  const userAccessToken = auth.currentUser?.getIdTokenResult();
   const [user, setUser] = useState<User | null>(null);
-
+  const [hasCalendarAccess, setHasCalendarAccess] = useState(false);
+  const [currentMonthEvents, setCurrentMonthEvents] = useState<any[]>([]);
+  const [greeting, setGreeting] = useState<string>("");
+  const [isLoading, setIsLoading] = useState(false);
+  
   const handleSignIn = () => {
     provider.addScope("https://www.googleapis.com/auth/calendar");
     signInWithPopup(auth, provider)
@@ -152,94 +56,34 @@ export default function Home() {
         console.error("Error signing in:", error);
       });
   };
-  // based on users time of day and weather suggest a greeting
-  useEffect(() => {
-    const now = new Date();
-    const hour = now.getHours();
-    if (hour < 12) {
-      setUserGreeting("Good morning! ");
-    } else if (hour < 18) {
-      setUserGreeting("Good afternoon! ");
-    } else {
-      setUserGreeting("Good evening! ");
-    }
-  }, []);
 
-  const [hasCalendarAccess, setHasCalendarAccess] = useState(false);
-
-  useEffect(() => {
-    if (user) {
-      // Check if the user has granted calendar access
-      auth.currentUser
-        ?.getIdTokenResult()
-        .then((idTokenResult) => {
-          const scopes =
-            idTokenResult.claims["https://www.googleapis.com/auth/calendar"];
-          setHasCalendarAccess(!!scopes);
-
-          // If scopes are not found in claims, check the user's providerData
-          if (!scopes) {
-            const googleProvider = user.providerData.find(
-              (provider) => provider.providerId === "google.com"
-            );
-            if (googleProvider) {
-              setHasCalendarAccess(true);
-            }
-          }
-        })
-        .catch((error) => {
-          console.error("Error checking calendar access:", error);
-          // In case of an error, assume the user has access to avoid false negatives
-          setHasCalendarAccess(true);
-        });
-    } else {
-      setHasCalendarAccess(false);
-    }
-  }, [user]);
-
-  useEffect(() => {
-    if (selectedCategory !== "travelling") return;
-    getTravelSuggestion().then((suggestion) => {
-      setTravelSuggestion(suggestion || "");
-    });
-  }, [selectedPlace]);
-
-  const [currentMonthEvents, setCurrentMonthEvents] = useState<any[]>([]);
-
-  const [greeting, setGreeting] = useState<string>("");
-
-  useEffect(() => {
-    if (selectedCategory !== "event-planning") return;
-    const generateGreeting = async () => {
-      if (user && hasCalendarAccess) {
-        if (currentMonthEvents.length === 0) {
-          setGreeting("You don't have any events scheduled for this month. Would you like to plan something?");
-        } else {
-          const eventSummaries = currentMonthEvents.map((event) => ({
-            summary: event.summary,
-            start: event.start?.dateTime || event.start?.date || "",
-            end: event.end?.dateTime || event.end?.date || "",
-            location: event.location || "",
-          }));
-          console.log("Event Summaries:", eventSummaries);
-
-          const prompt = `Generate a brief suggestion to go or to make changes based on these upcoming events. Don't ask for weather or anything else, just give a suggestion. Also suggest places to visit or things to do between the events or in the place of the event: ${JSON.stringify(eventSummaries)}`;
-          if (!user) {
-            setGreeting("Welcome! To see your personalized greeting, please sign in and grant calendar access.");
-          } else {
-            const generatedGreeting = await generateOpenAIResponse(prompt);
-            setGreeting(generatedGreeting);
-          }
-        }
-      } else if (user && !hasCalendarAccess) {
-        setGreeting("To see personalized event suggestions, please grant calendar access.");
+  const generateGreeting = async () => {
+    if (user && hasCalendarAccess) {
+      if (currentMonthEvents.length === 0) {
+        setGreeting("You don't have any events scheduled for this month. Would you like to plan something?");
       } else {
-        setGreeting("Welcome! To see your personalized greeting, please sign in and grant calendar access.");
-      }
-    };
+        const eventSummaries = currentMonthEvents.map((event) => ({
+          summary: event.summary,
+          start: event.start?.dateTime || event.start?.date || "",
+          end: event.end?.dateTime || event.end?.date || "",
+          location: event.location || "",
+        }));
+        console.log("Event Summaries:", eventSummaries);
 
-    generateGreeting();
-  }, [user, hasCalendarAccess, currentMonthEvents, selectedCategory]);
+        const prompt = `Generate a brief suggestion to go or to make changes based on these upcoming events. Don't ask for weather or anything else, just give a suggestion. Also suggest places to visit or things to do between the events or in the place of the event: ${JSON.stringify(eventSummaries)}`;
+        if (!user) {
+          setGreeting("Welcome! To see your personalized greeting, please sign in and grant calendar access.");
+        } else {
+          const generatedGreeting = await generateOpenAIResponse(prompt);
+          setGreeting(generatedGreeting);
+        }
+      }
+    } else if (user && !hasCalendarAccess) {
+      setGreeting("To see personalized event suggestions, please grant calendar access.");
+    } else {
+      setGreeting("Welcome! To see your personalized greeting, please sign in and grant calendar access.");
+    }
+  };
 
   const getCropSuggestion = async () => {
     const prompt = `Is ${selectedPlace} an optimal location for ${selectedCrop} farming?`;
@@ -258,18 +102,9 @@ export default function Home() {
     return await generateOpenAIResponse(prompt);
   };
 
-  useEffect(() => {
-    if (selectedCrop && selectedPlace && selectedCategory === "farming") {
-      getCropSuggestion().then((suggestion) => {
-        setCropSuggestion(suggestion || "");
-      });
-    }
-    if (selectedPlace && selectedCategory === "travelling") {
-      getTravelSuggestion().then((suggestion) => {
-        setTravelSuggestion(suggestion || "");
-      });
-    } 
-  }, [selectedCrop, selectedPlace, selectedCategory]);
+  const handleSignOut = () => {
+    auth.signOut().then(() => setUser(null));
+  };
 
   const fetchCurrentMonthEvents = async () => {
     if (user && hasCalendarAccess) {
@@ -303,29 +138,59 @@ export default function Home() {
   };
 
   useEffect(() => {
+    // Auth state listener
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+    });
+
+    // Time-based greeting
+    const hour = new Date().getHours();
+    setUserGreeting(hour < 12 ? "Good morning! " : hour < 18 ? "Good afternoon! " : "Good evening! ");
+
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (user) {
+      // Check calendar access
+      auth.currentUser?.getIdTokenResult()
+        .then((idTokenResult) => {
+          const scopes = idTokenResult.claims["https://www.googleapis.com/auth/calendar"];
+          setHasCalendarAccess(!!scopes || user.providerData.some(provider => provider.providerId === "google.com"));
+        })
+        .catch((error) => {
+          console.error("Error checking calendar access:", error);
+          setHasCalendarAccess(true);
+        });
+    } else {
+      setHasCalendarAccess(false);
+    }
+  }, [user]);
+
+  useEffect(() => {
     if (user && hasCalendarAccess) {
       fetchCurrentMonthEvents();
     }
   }, [user, hasCalendarAccess]);
 
-  const handleSignOut = () => {
-    auth.signOut().then(() => setUser(null));
-  };
-
-  const handleCreateEvent = async () => {
-    // Implement event creation logic here
-    console.log("Creating event...");
-  };
-
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-    });
+    const updateSuggestions = async () => {
+      setIsLoading(true);
+      if (selectedCategory === "farming" && selectedCrop && selectedPlace) {
+        const suggestion = await getCropSuggestion();
+        setCropSuggestion(suggestion || "");
+      } else if (selectedCategory === "travelling" && selectedPlace) {
+        const suggestion = await getTravelSuggestion();
+        setTravelSuggestion(suggestion || "");
+      } else if (selectedCategory === "event-planning") {
+        await generateGreeting();
+      }
+      setIsLoading(false);
+    };
 
-    return () => unsubscribe();
-  }, []);
+    updateSuggestions();
+  }, [selectedCategory, selectedCrop, selectedPlace, user, hasCalendarAccess]);
 
-  console.log(currentMonthEvents);
   return (
     <main className="flex min-h-screen flex-col items-center justify-between p-2 max-w-lg mx-auto mt-4">
       <h1 className="text-xl mb-4">{userGreeting}</h1>
@@ -388,22 +253,29 @@ export default function Home() {
           Search
         </button>
       </div>
-      {cropSuggestion && selectedCategory === "farming" && (
+      {isLoading ? (
         <div className="mt-4">
-          <h1 className="text-xl font-normal mb-4">{cropSuggestion}</h1>
+          <p className="text-xl font-normal mb-4">Loading suggestion...</p>
         </div>
-      )}
-      {travelSuggestion && selectedCategory === "travelling" && (
-        <div className="mt-4">
-          <h1 className="text-xl font-normal mb-4">{travelSuggestion}</h1>
-        </div>
-      )}
-
-      {selectedCategory === "event-planning" && (
-        <div className="mt-4">
-          <p className="text-sm text-gray-500">This information is from your Google Calendar</p>
-          <h1 className="text-xl font-normal mb-2 ">{greeting}</h1>
-        </div>
+      ) : (
+        <>
+          {cropSuggestion && selectedCategory === "farming" && (
+            <div className="mt-4">
+              <h1 className="text-xl font-normal mb-4">{cropSuggestion}</h1>
+            </div>
+          )}
+          {travelSuggestion && selectedCategory === "travelling" && (
+            <div className="mt-4">
+              <h1 className="text-xl font-normal mb-4">{travelSuggestion}</h1>
+            </div>
+          )}
+          {selectedCategory === "event-planning" && (
+            <div className="mt-4">
+              <p className="text-sm text-gray-500">This information is from your Google Calendar</p>
+              <h1 className="text-xl font-normal mb-2 ">{greeting}</h1>
+            </div>
+          )}
+        </>
       )}
       <button
         onClick={user ? handleSignOut : handleSignIn}
